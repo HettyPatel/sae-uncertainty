@@ -11,9 +11,6 @@ Usage:
         --output-dir results/sae_uncertainty_1094/
 """
 
-import sys
-sys.path.append('.')
-
 import csv
 import json
 import torch

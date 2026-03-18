@@ -12,9 +12,6 @@ Usage:
         --output-dir results/sae_suppression_by_category_1094/
 """
 
-import sys
-sys.path.append('.')
-
 import csv
 import torch
 import pickle

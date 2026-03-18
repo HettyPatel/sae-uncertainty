@@ -34,22 +34,15 @@ cd sae-uncertainty
 conda create -n sae-uncertainty python=3.10 -y
 conda activate sae-uncertainty
 
-# Install dependencies
-pip install -r requirements.txt
+# Install package (editable mode)
+pip install -e .
 
 # Login to HuggingFace (needed to download SAEs and models)
 huggingface-cli login
-```
 
-### Pre-download SAEs (recommended)
-
-SAE downloads can be flaky during long runs. Cache them upfront:
-
-```bash
+# Pre-download SAEs (recommended, avoids flaky downloads during long runs)
 python scripts/download_saes.py
 ```
-
-This downloads all 32 Llama Scope 8x SAEs (~1GB each) to `~/.cache/huggingface/`.
 
 ## Supported Models
 
@@ -93,7 +86,7 @@ python experiments/extract_features.py \
     --output-dir results/extract_features_mmlu_discovery/
 ```
 
-This is the most expensive step (~7+ hours for 7K questions across 32 layers on a single GPU). It:
+This is the most expensive step (GPU-intensive). It:
 1. Runs inference on all questions, caching residual stream activations per layer
 2. Loads each SAE one at a time, encodes activations, stores sparse feature representations
 3. Computes differential statistics (Mann-Whitney U) between correct/incorrect groups
@@ -124,7 +117,7 @@ python scripts/analyze_quadrant.py \
     --entropy-percentile 25
 ```
 
-CPU only, runs in minutes. Classifies features into pure_uncertainty, pure_incorrectness, and both categories.
+CPU only. Classifies features into pure_uncertainty, pure_incorrectness, and both categories.
 
 `--entropy-percentile 25` means bottom 25% entropy = "confident", top 25% = "uncertain" (middle 50% excluded from grouping). Omit for a median split.
 
@@ -188,6 +181,7 @@ sae-uncertainty/
 │   └── utils.py                 # Seeding, eval set loading, layer parsing
 ├── results/                     # Generated outputs (gitignored: *.pkl, *.pt)
 ├── logs/                        # Experiment logs
+├── pyproject.toml
 └── requirements.txt
 ```
 

@@ -14,9 +14,6 @@ Usage:
         --output-dir results/sae_both_feature_selection/
 """
 
-import sys
-sys.path.append('.')
-
 import csv
 import torch
 import pickle
