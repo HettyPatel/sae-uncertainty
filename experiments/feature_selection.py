@@ -52,7 +52,6 @@ def main():
     parser.add_argument('--output-dir', type=str,
                         default='results/sae_both_feature_selection/')
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--load-in-8bit', action='store_true')
     parser.add_argument('--seed', type=int, default=42)
 
     args = parser.parse_args()
@@ -64,7 +63,7 @@ def main():
     # Load model
     print(f"\nLoading model: {args.model}")
     model, tokenizer, model_config = load_model(
-        args.model, device=args.device, load_in_8bit=args.load_in_8bit
+        args.model, device=args.device
     )
 
     # Determine suppress layers

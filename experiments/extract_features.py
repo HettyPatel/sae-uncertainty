@@ -42,8 +42,6 @@ def main():
                         help='Number of top differential features to report per layer')
     parser.add_argument('--output-dir', type=str, default='results/sae_uncertainty/')
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--load-in-8bit', action='store_true')
-
     args = parser.parse_args()
     seed_everything(42)
 
@@ -53,7 +51,7 @@ def main():
     # Load model
     print(f"\nLoading model: {args.model}")
     model, tokenizer, model_config = load_model(
-        args.model, device=args.device, load_in_8bit=args.load_in_8bit
+        args.model, device=args.device
     )
 
     # Determine SAE layers

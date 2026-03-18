@@ -3,7 +3,7 @@ import torch
 import operator
 from functools import reduce
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 CONFIG_PATH = Path(__file__).parent.parent / "configs" / "models.yaml"
@@ -29,7 +29,7 @@ def get_layers(model, config: dict):
     return obj
 
 
-def load_model(model_name: str, device: str = "cuda", load_in_8bit: bool = False):
+def load_model(model_name: str, device: str = "cuda"):
     """Load model and tokenizer. Returns (model, tokenizer, config)."""
     config = load_model_config(model_name)
     dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}
@@ -42,20 +42,12 @@ def load_model(model_name: str, device: str = "cuda", load_in_8bit: bool = False
         tokenizer.pad_token_id = tokenizer.eos_token_id
     tokenizer.padding_side = "left"
 
-    if load_in_8bit:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            device_map={"": device},
-            low_cpu_mem_usage=True,
-        )
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=dtype,
-            device_map={"": device},
-            low_cpu_mem_usage=True,
-        )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=dtype,
+        device_map={"": device},
+        low_cpu_mem_usage=True,
+    )
     model.eval()
 
     layers = get_layers(model, config)
