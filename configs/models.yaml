@@ -1,0 +1,34 @@
+# Model configurations for SAE uncertainty experiments
+# Each model needs: HuggingFace ID, layer access path, SAE release/ID info, and default layers
+
+meta-llama/Llama-3.1-8B:
+  num_layers: 32
+  layer_accessor: model.model.layers
+  sae_release: llama_scope_lxr_8x
+  sae_id_template: "l{layer}r_8x"
+  default_sae_layers: [0, 4, 8, 12, 16, 20, 24, 28, 31]
+  dtype: float16
+
+google/gemma-2-9b:
+  num_layers: 42
+  layer_accessor: model.model.layers
+  sae_release: gemma-scope-9b-pt-res-canonical
+  sae_id_template: "layer_{layer}/width_16k/canonical"
+  default_sae_layers: [0, 5, 10, 15, 20, 25, 30, 35, 40]
+  dtype: bfloat16
+
+google/gemma-2-9b-it:
+  num_layers: 42
+  layer_accessor: model.model.layers
+  sae_release: gemma-scope-9b-it-res
+  sae_id_template: "layer_{layer}/width_16k/average_l0_77"
+  default_sae_layers: [9, 20, 31]
+  dtype: bfloat16
+
+Qwen/Qwen2.5-7B-Instruct:
+  num_layers: 28
+  layer_accessor: model.model.layers
+  sae_release: andyrdt/saes-qwen2.5-7b-instruct
+  sae_id_template: "qwen2.5-7b-it/{layer}-resid-post-aa"
+  default_sae_layers: [3, 7, 11, 15, 19, 23, 27]
+  dtype: bfloat16
