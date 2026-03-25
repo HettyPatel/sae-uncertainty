@@ -6,6 +6,7 @@ __pycache__/
 dist/
 build/
 *.pkl
+!results/sae_both_feature_selection_all_layers_p25/both_feature_selection.pkl
 *.pt
 *.bin
 .env
