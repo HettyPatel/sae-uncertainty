@@ -27,7 +27,7 @@ from src.evaluation import run_eval, summarise
 
 
 def load_top_features_by_category(quadrant_pkl, layers, top_n=5):
-    """Load top-N pure_uncertainty and pure_incorrectness features per layer."""
+    """Load top-N features per category per layer."""
     with open(quadrant_pkl, 'rb') as f:
         data = pickle.load(f)
 
@@ -47,6 +47,7 @@ def load_top_features_by_category(quadrant_pkl, layers, top_n=5):
 
         pure_unc = sig_unc - sig_inc
         pure_inc = sig_inc - sig_unc
+        both_set = sig_unc & sig_inc
 
         unc_ranked = sorted(
             [r for r in comp['pure_uncertainty'] if r['feature_idx'] in pure_unc],
@@ -58,9 +59,19 @@ def load_top_features_by_category(quadrant_pkl, layers, top_n=5):
             key=lambda x: x['effect_size'], reverse=True
         )[:top_n]
 
+        # For "both", rank by min(unc_effect, inc_effect)
+        inc_lookup = {r['feature_idx']: r['effect_size'] for r in comp['pure_incorrectness']}
+        both_ranked = sorted(
+            [r for r in comp['pure_uncertainty'] if r['feature_idx'] in both_set],
+            key=lambda x: min(x['effect_size'], inc_lookup.get(x['feature_idx'], 0)),
+            reverse=True
+        )[:top_n]
+
         features[layer] = {
             'pure_uncertainty': [(r['feature_idx'], r['effect_size']) for r in unc_ranked],
             'pure_incorrectness': [(r['feature_idx'], r['effect_size']) for r in inc_ranked],
+            'both': [(r['feature_idx'], min(r['effect_size'], inc_lookup.get(r['feature_idx'], 0)))
+                     for r in both_ranked],
         }
 
     return features
@@ -83,9 +94,9 @@ def main():
                         default='results/sae_individual_suppression_by_category_p25/')
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--category', type=str, default='both',
-                        choices=['both', 'pure_uncertainty', 'pure_incorrectness'],
-                        help='Which category to run (or both)')
+    parser.add_argument('--category', type=str, default='all',
+                        choices=['all', 'pure_uncertainty', 'pure_incorrectness', 'both'],
+                        help='Which category to run (all=unc+inc, or a single category)')
     args = parser.parse_args()
 
     seed_everything(args.seed)
@@ -104,7 +115,10 @@ def main():
     print(f"Loading top-{args.top_n} features per category...")
     features = load_top_features_by_category(args.quadrant_pkl, suppress_layers, args.top_n)
 
-    categories = ['pure_uncertainty', 'pure_incorrectness'] if args.category == 'both' else [args.category]
+    if args.category == 'all':
+        categories = ['pure_uncertainty', 'pure_incorrectness', 'both']
+    else:
+        categories = [args.category]
 
     total = 0
     for cat in categories:
