@@ -71,7 +71,7 @@ def main():
     for ax, cat, v1, v2, color in [
         (axes[0], 'Pure Uncertainty', unc1, unc2, '#e74c3c'),
         (axes[1], 'Pure Incorrectness', inc1, inc2, '#3498db'),
-        (axes[2], 'Both', both1, both2, '#9b59b6'),
+        (axes[2], 'Confounded', both1, both2, '#9b59b6'),
     ]:
         ax.plot(norm1, v1, 'o-', color=color, alpha=0.7, markersize=4,
                 linewidth=1.5, label=args.name1)
@@ -116,7 +116,7 @@ def main():
              linewidth=1.5, label=args.name1)
     ax3.plot(norm2, tboth2, 's--', color='#9b59b6', alpha=0.7, markersize=4,
              linewidth=1.5, label=args.name2)
-    ax3.set_title('Both (min of C vs A, B vs A)', fontsize=13)
+    ax3.set_title('Confounded (min of C vs A, B vs A)', fontsize=13)
     ax3.set_xlabel('Normalized Depth', fontsize=11)
     ax3.set_ylabel("Peak Cohen's d", fontsize=11)
     ax3.legend(fontsize=10)
