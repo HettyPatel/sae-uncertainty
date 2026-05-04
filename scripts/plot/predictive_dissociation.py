@@ -73,16 +73,16 @@ def main():
     data_ent = defaultdict(dict)
     for r in rows:
         if r['target'] == 'entropy' and r['scope'].startswith('L') and r['feature_set'] in feature_sets:
-            layer = int(r['layer'])
-            data_ent[r['feature_set']][layer] = float(r['metric1'])
+            val = float(r['metric1'])
+            if not np.isnan(val):
+                data_ent[r['feature_set']][int(r['layer'])] = val
 
     fig, ax = plt.subplots(figsize=(4.5, 3.0))
 
     for fs in feature_sets:
         layers_sorted = sorted(data_ent[fs].keys())
         spearman = [data_ent[fs][l] for l in layers_sorted]
-        spearman_plot = [s if abs(s) > 0.01 else np.nan for s in spearman]
-        ax.plot(layers_sorted, spearman_plot, f'{markers[fs]}-', color=colors[fs],
+        ax.plot(layers_sorted, spearman, f'{markers[fs]}-', color=colors[fs],
                 linewidth=1.5, markersize=3.5, alpha=0.85, label=labels[fs])
 
     ax.set_xlabel('Layer', fontsize=9)
