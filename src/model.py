@@ -6,9 +6,11 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-CONFIG_PATH = Path(__file__).parent.parent / "configs" / "models.yaml"
+# Path to the YAML config file containing model-specific settings
+CONFIG_PATH = Path(__file__).parent.parent / "configs" / "models.yaml" 
 
 
+# Load yamal config for the given model. 
 def load_model_config(model_name: str) -> dict:
     with open(CONFIG_PATH) as f:
         configs = yaml.safe_load(f)
@@ -20,6 +22,7 @@ def load_model_config(model_name: str) -> dict:
     return configs[model_name]
 
 
+# get the list of layers from model object
 def get_layers(model, config: dict):
     """Get the model's transformer layers using the configured accessor path."""
     parts = config["layer_accessor"].split(".")
@@ -33,9 +36,12 @@ def load_model(model_name: str, device: str = "cuda"):
     """Load model and tokenizer. Returns (model, tokenizer, config)."""
     config = load_model_config(model_name)
     dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}
+    
+    #get dtype from config, default to float16 if not specified
     dtype = dtype_map.get(config.get("dtype", "float16"), torch.float16)
 
     print(f"Loading model and tokenizer for {model_name} on {device}...")
+    
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token

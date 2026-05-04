@@ -1,206 +1,233 @@
 # SAE Uncertainty Feature Discovery
 
-Discovering and manipulating internal uncertainty representations in LLMs using Sparse Autoencoders (SAEs).
+Code for the paper *LLMs Encode When They're Wrong: Dissociating Uncertainty and Incorrectness via Sparse Autoencoders*.
 
 We use pretrained SAEs to decompose a model's residual stream into interpretable features, then identify which features encode **uncertainty**, **incorrectness**, or **both** — and show they have distinct causal roles.
 
-## Key Idea
+## Key Findings
 
 We split MCQ questions into 4 groups based on correctness and output entropy:
 
-|                        | Correct              | Incorrect            |
-|------------------------|----------------------|----------------------|
-| **Confident** (low entropy)  | Group A              | Group B              |
-| **Uncertain** (high entropy) | Group C              | Group D              |
+|                              | Correct  | Incorrect |
+|------------------------------|----------|-----------|
+| **Confident** (low entropy)  | A        | B         |
+| **Uncertain** (high entropy) | C        | D         |
 
 Two comparisons disentangle uncertainty from incorrectness:
 - **C vs A** (both correct, different entropy) → **pure uncertainty** features
 - **B vs A** (both confident, different correctness) → **pure incorrectness** features
-- Features significant in **both** → **confounded ("both")** features
+- Features significant in both → **confounded** features
 
-Suppression experiments reveal three causal roles:
-1. **Pure uncertainty** features are essential — suppressing them destroys accuracy
-2. **Pure incorrectness** features are epiphenomenal — suppressing them changes nothing
-3. **"Both" features** are causally harmful — suppressing them **improves accuracy** and **halves entropy**
+Suppressing each population at the SAE level reveals three distinct causal roles:
+
+1. **Pure uncertainty** features are essential — suppressing them destroys accuracy (-13.4%)
+2. **Pure incorrectness** features are epiphenomenal — suppressing them changes nothing (+0.03%)
+3. **Confounded** features are causally harmful — suppressing them **improves accuracy (+1.1%)** and **reduces entropy by 75%**
+
+These results replicate across **Llama-3.1-8B** (Llama Scope SAEs, 32K width) and **Gemma-2-9B** (Gemma Scope SAEs, 16K width), and transfer bidirectionally between MMLU and RACE.
 
 ## Setup
 
 ```bash
-# Clone
 git clone https://github.com/HettyPatel/sae-uncertainty.git
 cd sae-uncertainty
 
-# Create environment
 conda create -n sae-uncertainty python=3.10 -y
 conda activate sae-uncertainty
-
-# Install package (editable mode)
 pip install -e .
 
-# Login to HuggingFace (needed to download SAEs and models)
 huggingface-cli login
 
-# Pre-download SAEs (recommended, avoids flaky downloads during long runs)
-python scripts/download_saes.py
+# Pre-download SAEs (optional, avoids fetch-during-run)
+python scripts/download_saes.py --release llama_scope_lxr_8x --id-template "l{layer}r_8x" --layers 0-31
+python scripts/download_saes.py --release gemma-scope-9b-pt-res-canonical --id-template "layer_{layer}/width_16k/canonical" --layers 0-41
 ```
 
-## Supported Models
+Models configured in [configs/models.yaml](configs/models.yaml):
 
-Configured in `configs/models.yaml`:
-
-| Model | SAE Source | Status |
-|-------|-----------|--------|
-| `meta-llama/Llama-3.1-8B` | Llama Scope (8x) | Primary, fully tested |
-| `google/gemma-2-9b` | Gemma Scope | Config ready |
-| `google/gemma-2-9b-it` | Gemma Scope | Config ready |
-| `Qwen/Qwen2.5-7B-Instruct` | Community SAEs | Config ready |
+| Model | SAE Source | Layers | SAE Width |
+|-------|-----------|--------|-----------|
+| `meta-llama/Llama-3.1-8B` | Llama Scope (`llama_scope_lxr_8x`) | 32 | 32,768 |
+| `google/gemma-2-9b` | Gemma Scope (`gemma-scope-9b-pt-res-canonical`) | 42 | 16,384 |
 
 ## Pipeline
 
-The full pipeline has 6 steps. Steps 1-2 are data prep (CPU only). Step 3 is GPU-intensive. Steps 4-6 require GPU for model inference.
-
-### Step 1: Create evaluation set
-
-```bash
-python scripts/create_mmlu_eval_set.py --split test --samples 14042
+```
+extract_features.py  →  analyze_quadrant.py  →  individual_suppression_by_category.py  →  quick_combined_suppression.py
+   (cache features)      (Mann-Whitney U)         (per-feature screening)                  (combined of beneficial)
 ```
 
-Creates `data/eval_sets/eval_set_mcq_mmlu_test_14042.json`. You can also use existing eval sets in `data/eval_sets/` (ARC-Challenge, BoolQ, NQ).
+See [experiments/README.md](experiments/README.md) for detailed input/output of each step.
 
-### Step 2: Split into discovery / validation
-
-```bash
-python scripts/split_eval_set.py \
-    --input data/eval_sets/eval_set_mcq_mmlu_test_14042.json
-```
-
-Produces `*_discovery.json` and `*_validation.json` (50/50 split). The discovery set is used for feature identification and selection; the validation set is held out for final evaluation.
-
-### Step 3: Extract SAE features
+### 1. Feature extraction
 
 ```bash
 python experiments/extract_features.py \
     --model meta-llama/Llama-3.1-8B \
     --eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_discovery.json \
     --sae-layers 0-31 \
-    --output-dir results/extract_features_mmlu_discovery/
+    --output-dir results/sae_uncertainty_mmlu_discovery_all_layers/
 ```
 
-This is the most expensive step (GPU-intensive). It:
-1. Runs inference on all questions, caching residual stream activations per layer
-2. Loads each SAE one at a time, encodes activations, stores sparse feature representations
-3. Computes differential statistics (Mann-Whitney U) between correct/incorrect groups
+Caches per-question SAE feature activations at every layer. The most expensive step.
 
-**Outputs:** `sae_uncertainty_Llama-3.1-8B.pkl` (large, contains per-question SAE features), `differential_features_*.csv`, `entropy_features_*.csv`
-
-For long runs, use nohup:
-```bash
-mkdir -p logs
-nohup python experiments/extract_features.py \
-    --model meta-llama/Llama-3.1-8B \
-    --eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_discovery.json \
-    --sae-layers 0-31 \
-    --output-dir results/extract_features_mmlu_discovery/ \
-    > logs/extract_features.log 2>&1 &
-
-tail -f logs/extract_features.log
-```
-
-**Layer selection:** Use `--sae-layers 0-31` for all layers, or a subset like `--sae-layers 16,20,24,28,31`. If omitted, uses defaults from `configs/models.yaml`.
-
-### Step 4: Quadrant analysis
+### 2. Quadrant analysis
 
 ```bash
 python scripts/analyze_quadrant.py \
-    --pickle results/extract_features_mmlu_discovery/sae_uncertainty_Llama-3.1-8B.pkl \
-    --output-dir results/quadrant_mmlu_discovery/ \
+    --pickle results/sae_uncertainty_mmlu_discovery_all_layers/sae_uncertainty_Llama-3.1-8B.pkl \
+    --output-dir results/sae_quadrant_mmlu_discovery_p25/ \
     --entropy-percentile 25
 ```
 
-CPU only. Classifies features into pure_uncertainty, pure_incorrectness, and both categories.
+Mann-Whitney U test per feature per layer. `--entropy-percentile 25` means the **bottom 25%** of entropies form the *confident* group and the **top 25%** form the *uncertain* group (middle 50% excluded for clean separation).
 
-`--entropy-percentile 25` means bottom 25% entropy = "confident", top 25% = "uncertain" (middle 50% excluded from grouping). Omit for a median split.
-
-**Outputs:** `quadrant_analysis.pkl`, `quadrant_summary.csv`, per-layer CSVs
-
-### Step 5: Suppression by category
+### 3. Individual feature screening
 
 ```bash
-python experiments/suppress_by_category.py \
+python experiments/individual_suppression_by_category.py \
     --model meta-llama/Llama-3.1-8B \
+    --quadrant-pkl results/sae_quadrant_mmlu_discovery_p25/quadrant_analysis.pkl \
     --eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_discovery.json \
-    --quadrant-pkl results/quadrant_mmlu_discovery/quadrant_analysis.pkl \
-    --output-dir results/suppression_by_category/
+    --output-dir results/sae_individual_suppression_unc_p25/ \
+    --category pure_uncertainty --top-n 5
 ```
 
-Suppresses top-N features from each category (pure_uncertainty, pure_incorrectness, both) per layer, then all layers combined. Measures accuracy and entropy changes.
+Run for `pure_uncertainty`, `pure_incorrectness`, `both`. The `--top-n` cap selects features by effect size (omit for confounded on Llama MMLU; we test all 102).
 
-**Outputs:** `suppression_by_category.csv`, `suppression_by_category.pkl`
+For Llama MMLU confounded specifically, [experiments/feature_selection.py](experiments/feature_selection.py) is an end-to-end version that runs individual screening + combined validation in one go.
 
-### Step 6: Feature selection (validation)
+### 4. Combined suppression
 
 ```bash
-python experiments/feature_selection.py \
+python experiments/quick_combined_suppression.py \
+    --individual-csv results/sae_individual_suppression_unc_p25/individual_suppression_by_category.csv \
+    --eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_validation.json \
+    --label "PURE_UNCERTAINTY"
+```
+
+Selects features with `acc_delta ≥ 0` AND `ent_delta < 0` from the individual CSV, then suppresses all of them simultaneously on the held-out validation set.
+
+## Side Experiments
+
+### Cross-dataset transfer
+
+Apply features discovered on one dataset to another:
+
+```bash
+python experiments/quick_combined_suppression.py \
+    --individual-csv results/sae_individual_suppression_both_p25/individual_suppression_by_category.csv \
+    --eval-set data/eval_sets/eval_set_mcq_arc_challenge_2577.json \
+    --label "MMLU_TO_ARC"
+```
+
+### Random feature baseline
+
+Match the per-layer feature counts of our method but pick features randomly from active SAE features. Same screening + combined pipeline; only difference is feature selection.
+
+```bash
+python experiments/random_suppression_baseline.py \
     --model meta-llama/Llama-3.1-8B \
-    --eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_discovery.json \
+    --individual-csv results/sae_both_feature_selection_p25/individual_suppression_selection.csv \
+    --discovery-pkl results/sae_uncertainty_mmlu_discovery_all_layers/sae_uncertainty_Llama-3.1-8B.pkl \
+    --discovery-eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_discovery.json \
+    --eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_validation.json \
+    --output-dir results/sae_random_baseline_mmlu_p25/
+```
+
+### Predictive dissociation
+
+Train classifiers on cached SAE features to predict correctness (logistic regression) and entropy (ridge regression):
+
+```bash
+python experiments/predict_incorrectness.py \
+    --discovery-pkl results/sae_uncertainty_mmlu_discovery_all_layers/sae_uncertainty_Llama-3.1-8B.pkl \
+    --validation-pkl results/sae_uncertainty_mmlu_validation_all_layers/sae_uncertainty_Llama-3.1-8B.pkl \
+    --quadrant-pkl results/sae_quadrant_mmlu_discovery_p25/quadrant_analysis.pkl \
+    --output-dir results/sae_predict_incorrectness_p25/
+```
+
+### Selective prediction
+
+Use classifier confidence to abstain on low-confidence questions:
+
+```bash
+python experiments/selective_prediction.py \
+    --discovery-pkl results/sae_uncertainty_mmlu_discovery_all_layers/sae_uncertainty_Llama-3.1-8B.pkl \
+    --validation-pkl results/sae_uncertainty_mmlu_validation_all_layers/sae_uncertainty_Llama-3.1-8B.pkl \
+    --quadrant-pkl results/sae_quadrant_mmlu_discovery_p25/quadrant_analysis.pkl \
+    --output-dir results/sae_selective_prediction_p25/
+```
+
+### Self-abstention
+
+Add "E. I don't know" as a 5th MCQ option and measure how the model's choice and feature activations change:
+
+```bash
+python experiments/self_abstain_experiment.py \
+    --model meta-llama/Llama-3.1-8B \
+    --eval-set data/eval_sets/eval_set_mcq_mmlu_test_14042_validation.json \
+    --output-dir results/sae_self_abstain_experiment/
+```
+
+### Selection criterion ablation
+
+Compare `acc + ent`, `acc only`, `ent only` screening criteria using already-collected individual suppression data:
+
+```bash
+python experiments/feature_selection_ablation.py \
+    --individual-csv results/sae_both_feature_selection_p25/individual_suppression_selection.csv \
     --validation-set data/eval_sets/eval_set_mcq_mmlu_test_14042_validation.json \
-    --quadrant-pkl results/quadrant_mmlu_discovery/quadrant_analysis.pkl \
-    --output-dir results/feature_selection/
+    --output-dir results/sae_feature_selection_ablation/
 ```
 
-Tests each "both" feature individually on the discovery set, selects ones where accuracy >= baseline AND entropy < baseline, then evaluates the selected set on the held-out validation data.
+## Headline Numbers (Llama-3.1-8B, MMLU validation, 7,021 samples)
 
-**Outputs:** `individual_suppression_selection.csv`, `validation_suppression.csv`, `both_feature_selection.pkl`
+Baseline: **61.91%** accuracy, **0.824** mean entropy.
+
+**Combined suppression of beneficial features:**
+
+| Category | Tested | Beneficial | Acc Δ | Ent Δ |
+|----------|--------|-----------|-------|-------|
+| Confounded | 102 | 55 | **+1.10%** | **-0.619** |
+| Pure uncertainty | 160 | 63 | +0.21% | -0.382 |
+| Pure incorrectness | 137 | 52 | +0.03% | ~0 |
+| Random baseline | 102 | 35 | +0.04% | -0.005 |
+
+**Cross-dataset transfer (confounded features):**
+
+| Discovery → Eval | Features | Acc Δ |
+|------------------|----------|-------|
+| MMLU → ARC | 55 | +0.81% |
+| MMLU → RACE | 55 | +0.70% |
+| RACE → MMLU | 30 | +0.75% |
+
+Gemma replication and full per-layer breakdowns in [results/feature_manifest/](results/feature_manifest/).
+
+## Suppression Mechanism
+
+The `SAESuppressionHook` in [src/sae.py](src/sae.py) performs a surgical intervention on the residual stream:
+
+1. At the target layer, intercept the hidden state at the last token
+2. Encode → SAE features
+3. Zero out target feature activations
+4. Decode original and modified separately
+5. Add `(modified_decoded - original_decoded)` as a delta on top of the original hidden state
+
+This isolates the targeted features' contribution while preserving all other information (the SAE's reconstruction error is identical in both branches and cancels out).
 
 ## Project Structure
 
 ```
 sae-uncertainty/
-├── configs/
-│   └── models.yaml              # Model + SAE configurations
-├── data/
-│   └── eval_sets/               # MCQ evaluation JSONs (MMLU, ARC, BoolQ, NQ)
-├── experiments/
-│   ├── extract_features.py      # Step 3: inference + SAE encoding + differential stats
-│   ├── suppress_by_category.py  # Step 5: suppress features by category, measure impact
-│   └── feature_selection.py     # Step 6: individual screening + validation
-├── scripts/
-│   ├── analyze_quadrant.py      # Step 4: quadrant analysis
-│   ├── create_mmlu_eval_set.py  # Step 1: create MMLU eval sets
-│   ├── split_eval_set.py        # Step 2: discovery/validation split
-│   ├── download_saes.py         # Pre-download SAE weights
-│   └── plot/                    # Plotting scripts
-│       ├── depth_gradient.py
-│       ├── feature_selection.py
-│       └── suppression.py
-├── src/
-│   ├── model.py                 # Model loading, config, layer access
-│   ├── evaluation.py            # MCQ evaluation, entropy, flip counting
-│   ├── sae.py                   # SAE loading, ResidualStreamHook, SAESuppressionHook
-│   ├── quadrant.py              # Quadrant feature loading/classification
-│   └── utils.py                 # Seeding, eval set loading, layer parsing
-├── results/                     # Generated outputs (gitignored: *.pkl, *.pt)
-├── logs/                        # Experiment logs
-├── pyproject.toml
-└── requirements.txt
+├── configs/models.yaml             # Model + SAE configuration
+├── data/eval_sets/                 # MCQ evaluation JSONs (see folder README)
+├── experiments/                    # Pipeline scripts (see folder README)
+├── scripts/                        # Setup, analysis, and plotting utilities
+├── src/                            # Model loading, evaluation, SAE hooks
+├── figures/                        # Paper figures
+├── results/feature_manifest/       # Curated tested + beneficial features (CSV)
+└── pyproject.toml
 ```
 
-## How Suppression Works
-
-The `SAESuppressionHook` performs a surgical intervention on the residual stream:
-
-1. At the target layer, intercept the hidden state (last token only)
-2. Encode through SAE → sparse feature activations
-3. Zero out target feature activations (or scale by `--scale`)
-4. Decode back through SAE
-5. Compute delta = modified_reconstruction - original_reconstruction
-6. Add delta to original hidden state
-
-This preserves all information not captured by the SAE, only removing the specific feature's contribution.
-
-## Notes
-
-- **GPU memory:** Llama-3.1-8B in float16 needs ~16GB. SAEs need ~1GB each (loaded/unloaded one at a time during extraction).
-- **Intermediate pickles** (`.pkl`) are pipeline artifacts generated between steps. They're gitignored but necessary — regenerate them by running the pipeline.
-- All experiments use `--device cuda` by default. Set `CUDA_VISIBLE_DEVICES` to select your GPU.
-- Random seed is fixed at 42 for reproducibility.
+Random seed is 42 throughout. All experiments use the entropy-percentile-25 threshold for the quadrant split.

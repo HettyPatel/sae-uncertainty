@@ -6,10 +6,13 @@ __pycache__/
 dist/
 build/
 *.pkl
-!results/sae_both_feature_selection_all_layers_p25/both_feature_selection.pkl
 *.pt
 *.bin
 .env
 *.log
 wandb/
 .DS_Store
+
+# Exclude all results except the curated feature manifest
+results/*
+!results/feature_manifest/
